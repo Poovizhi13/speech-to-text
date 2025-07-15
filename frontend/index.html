@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Advanced Speech to Text</title>
+  <style>
+    body { font-family: sans-serif; padding: 2em; max-width: 600px; margin: auto; }
+    #transcript { margin-top: 1em; padding: 1em; border: 1px solid #ccc; min-height: 100px; white-space: pre-wrap; }
+    .buttons { margin-top: 1em; display: flex; gap: 10px; flex-wrap: wrap; }
+    #volumeBar { height: 10px; background: lightgray; margin-top: 1em; position: relative; }
+    #volumeLevel { height: 100%; width: 0%; background: green; transition: width 0.1s; }
+  </style>
+</head>
+<body>
+
+  <h2>🎤 Advanced Speech to Text</h2>
+
+  <label for="language">🌍 Language:</label>
+  <select id="language">
+    <option value="en-US" selected>English (US)</option>
+    <option value="en-GB">English (UK)</option>
+    <option value="hi-IN">Hindi</option>
+    <option value="es-ES">Spanish</option>
+    <option value="fr-FR">French</option>
+  </select>
+
+  <div class="buttons">
+    <button id="startBtn">Start</button>
+    <button id="stopBtn">Stop</button>
+    <button id="clearBtn">Clear</button>
+    <button id="saveBtn">Save</button>
+  </div>
+
+  <div id="transcript"></div>
+
+  <div id="volumeBar"><div id="volumeLevel"></div></div>
+
+  <script>
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const saveBtn = document.getElementById('saveBtn');
+    const transcriptDiv = document.getElementById('transcript');
+    const languageSelector = document.getElementById('language');
+    const volumeLevel = document.getElementById('volumeLevel');
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) alert('Speech Recognition not supported. Use Chrome.');
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+
+    let fullTranscript = '';
+
+    recognition.onresult = (event) => {
+      let interim = '';
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        const transcript = event.results[i][0].transcript.trim();
+        if (event.results[i].isFinal) {
+          if (transcript.toLowerCase() === 'clear') {
+            fullTranscript = '';
+          } else if (transcript.toLowerCase() === 'save') {
+            saveTranscript();
+          } else if (transcript.toLowerCase() === 'stop') {
+            recognition.stop();
+          } else {
+            fullTranscript += transcript + ' ';
+          }
+        } else {
+          interim += transcript + ' ';
+        }
+      }
+      transcriptDiv.innerText = fullTranscript + interim;
+    };
+
+    recognition.onerror = (e) => console.error('Error:', e.error);
+
+    startBtn.onclick = () => {
+      recognition.lang = languageSelector.value;
+      recognition.start();
+      startMicMonitor();
+    };
+
+    stopBtn.onclick = () => {
+      recognition.stop();
+      stopMicMonitor();
+    };
+
+    clearBtn.onclick = () => {
+      fullTranscript = '';
+      transcriptDiv.innerText = '';
+    };
+
+    saveBtn.onclick = () => saveTranscript();
+
+    function saveTranscript() {
+      fetch('http://localhost:3000/save-transcript', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: transcriptDiv.innerText })
+      })
+      .then(res => res.json())
+      .then(data => alert('Transcript saved!'))
+      .catch(err => alert('Error saving transcript.'));
+    }
+
+    // Volume level indicator
+    let micStream, audioContext, analyser, dataArray, micInterval;
+
+    function startMicMonitor() {
+      navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+        micStream = stream;
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const source = audioContext.createMediaStreamSource(stream);
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+        dataArray = new Uint8Array(analyser.frequencyBinCount);
+        micInterval = setInterval(() => {
+          analyser.getByteFrequencyData(dataArray);
+          const avg = dataArray.reduce((a, b) => a + b) / dataArray.length;
+          volumeLevel.style.width = Math.min((avg / 256) * 100, 100) + '%';
+        }, 100);
+      }).catch(err => console.error('Mic error:', err));
+    }
+
+    function stopMicMonitor() {
+      clearInterval(micInterval);
+      if (micStream) micStream.getTracks().forEach(track => track.stop());
+      if (audioContext) audioContext.close();
+      volumeLevel.style.width = '0%';
+    }
+  </script>
+</body>
+</html>
